@@ -1,0 +1,38 @@
+# Local workflow & working files (not part of the repository)
+GEMINI.md
+TODO.md
+DevOps_Engineer_Assessment_Task.pdf
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build, test & coverage artifacts
+bin/
+dist/
+coverage.out
+coverage.html
+*.test
+
+# Logs & runtime outputs
+*.log
+health_log.txt*
+
+# Terraform local state & temporary files
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.auto.tfvars
+*secret*.tfvars
+crash.log
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
