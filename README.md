@@ -112,3 +112,32 @@ Defined in [monitoring/prometheus/alerts.yml](monitoring/prometheus/alerts.yml):
 2. Look at the adjacent **Application Logs (Loki)** panel over that same time range and narrow with `{service="app", level=~"WARN|ERROR"} | json` (filtering by `path` if needed).
 3. Inspect the expanded JSON fields (`uri`, `status`, `duration_ms`) to see whether the spike is external 404 probing (`uri="/api/..."`) or internal 5xx failures on a live endpoint.
 4. Check **Host** and **Containers** dashboards (CPU throttling, memory vs limit, or disk pressure) and Prometheus alert state to rule out infrastructure saturation or OOM restarts.
+
+## Host Health Script
+
+[scripts/system_health.sh](scripts/system_health.sh) collects CPU usage, memory usage, mounted filesystem disk usage, load average, and the top 5 processes by memory, appending each run to `health_log.txt` (with automatic rotation past 1 MiB across 3 backups).
+
+```bash
+./scripts/system_health.sh --help
+./scripts/system_health.sh --disk 80 --cpu 90 --mem 85
+./scripts/system_health.sh --json | jq .
+```
+
+| Exit Code | Meaning |
+| :--- | :--- |
+| `0` | All metrics below thresholds |
+| `1` | One or more warning thresholds exceeded (`[WARNING]`) |
+| `2` | One or more critical thresholds exceeded (`[CRITICAL]`, default `95%` or `--*-crit`) |
+| `3` | Invalid arguments or unreadable `/proc` inputs |
+
+### Scheduling (Every 5 Minutes)
+
+Install the systemd service + timer from [scripts/systemd/](scripts/systemd/):
+
+```bash
+sudo install -m 0755 scripts/system_health.sh /usr/local/bin/system_health.sh
+sudo cp scripts/systemd/system-health.service scripts/systemd/system-health.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now system-health.timer
+```
+
+`system-health.service` sets `SuccessExitStatus=1 2` so warning/critical health exits are logged without marking the scheduled unit as failed. Alternatively, copy [scripts/system-health.cron](scripts/system-health.cron) to `/etc/cron.d/system-health`.

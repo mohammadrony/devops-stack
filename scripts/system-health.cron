@@ -1,0 +1,2 @@
+# Run host health check every 5 minutes; alerts and metrics are written to health_log.txt
+*/5 * * * * root /usr/local/bin/system_health.sh --log-file /var/log/devops-stack/health_log.txt >/dev/null 2>&1
