@@ -8,6 +8,12 @@ variable "github_repository" {
   type        = string
 }
 
+variable "github_oidc_subject" {
+  description = "Optional full OIDC sub claim override matching GitHub immutable subject IDs."
+  type        = string
+  default     = null
+}
+
 variable "create_oidc_provider" {
   description = "Create the account-level GitHub OIDC provider."
   type        = bool

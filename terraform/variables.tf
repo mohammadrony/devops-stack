@@ -56,6 +56,12 @@ variable "github_repository" {
   default     = "mohammadrony/devops-stack"
 }
 
+variable "github_oidc_subject" {
+  description = "Full OIDC sub claim override when GitHub immutable subject IDs are enabled."
+  type        = string
+  default     = null
+}
+
 variable "create_oidc_provider" {
   description = "Create the account-level GitHub OIDC provider."
   type        = bool
