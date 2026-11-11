@@ -1,0 +1,9 @@
+[Unit]
+Description=Host health check for devops-stack
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/system_health.sh --log-file /var/log/devops-stack/health_log.txt
+LogsDirectory=devops-stack
+SuccessExitStatus=1 2
