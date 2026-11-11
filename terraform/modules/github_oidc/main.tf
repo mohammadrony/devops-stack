@@ -21,6 +21,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 locals {
   oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+  oidc_subject      = coalesce(var.github_oidc_subject, "repo:${var.github_repository}:ref:refs/heads/main")
 }
 
 data "aws_iam_policy_document" "assume_role" {
@@ -41,7 +42,7 @@ data "aws_iam_policy_document" "assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = [local.oidc_subject]
     }
   }
 }

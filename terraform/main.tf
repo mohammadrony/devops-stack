@@ -31,6 +31,7 @@ module "github_oidc" {
 
   name_prefix          = local.name_prefix
   github_repository    = var.github_repository
+  github_oidc_subject  = var.github_oidc_subject
   create_oidc_provider = var.create_oidc_provider
   ecr_repository_arn   = module.registry.repository_arn
   ec2_instance_arn     = module.compute.instance_arn
