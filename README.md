@@ -198,7 +198,7 @@ Three workflows under [.github/workflows/](.github/workflows/) handle testing, i
 
 ```bash
 terraform -chdir=terraform/bootstrap init && terraform -chdir=terraform/bootstrap apply
-cp terraform/environments/staging.tfbackend.example terraform/environments/staging.tfbackend
+cp terraform/environments/staging.tfbackend.example terraform/environments/staging.tfbackend   # set state bucket name
 terraform -chdir=terraform init -reconfigure -backend-config=environments/staging.tfbackend
 terraform -chdir=terraform plan -var-file=environments/staging.tfvars
 terraform -chdir=terraform apply -var-file=environments/staging.tfvars
@@ -227,7 +227,7 @@ The Helm chart in [charts/devops-stack/](charts/devops-stack/) syncs `API_TOKEN`
 ./scripts/k8s_local.sh down    # Delete local k3d cluster
 ```
 
-**In AWS (EKS)**: replace local Traefik with an AWS Load Balancer (ALB + HTTPS), point `SecretStore` to AWS Secrets Manager/SSM using an EKS IAM role (IRSA or Pod Identity), and pull pinned `sha-*` images from private ECR.
+**In AWS (EKS)**: replace local Traefik with an AWS Load Balancer (ALB + HTTPS), scale nodes with Karpenter or Cluster Autoscaler, point `SecretStore` to AWS Secrets Manager/SSM using an EKS IAM role (IRSA or Pod Identity), and pull pinned `sha-*` images from private ECR.
 
 ## Design Decisions
 
@@ -265,15 +265,3 @@ Estimate for running the `production` Terraform config ([production.tfvars](terr
 | Amazon ECR | ~1–2 GB container images | \$0.15 |
 | S3 State | Terraform state + `.tflock` | \$0.02 |
 | **Total (EC2)** | Single-instance setup | **~\$21.50/mo** |
-
-Running the same app on managed HA EKS in `ap-south-1` would cost roughly **\$155–180/month** because of the EKS control plane (\$73), multi-node EC2 (~2× `t3.small`, \$32.70), an ALB (~\$18), and NAT Gateway(s) (~\$33+).
-
-## What I Would Improve With More Time
-
-1. Add HTTPS in front of EC2 (with Caddy or an AWS Load Balancer) and move the server into a private subnet without a public IP.
-2. Deploy Prometheus and Grafana inside Kubernetes (`kube-prometheus-stack`) instead of only running them locally with Docker Compose.
-3. Add manual deployment approvals for `production` in GitHub Actions and automated post-deploy smoke checks in staging.
-
-## AI Tooling Note
-
-An AI coding assistant helped draft parts of the Go code, Terraform modules, Helm/Vault configs, Ansible playbook, and documentation. I reviewed, edited, and ran all tests, scripts, and pipelines myself.
