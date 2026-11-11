@@ -191,6 +191,7 @@ jobs:
       - name: Verify Cosign SBOM signing flow (ephemeral offline check)
         run: |
           COSIGN_PASSWORD="" cosign generate-key-pair
-          COSIGN_PASSWORD="" cosign sign-blob --yes --key cosign.key --tlog-upload=false --output-signature sbom.cdx.sig sbom.cdx.json
-          cosign verify-blob --key cosign.pub --signature sbom.cdx.sig --insecure-ignore-tlog sbom.cdx.json
-          rm -f cosign.key cosign.pub sbom.cdx.sig
+          cosign signing-config create --out signing-config.json
+          COSIGN_PASSWORD="" cosign sign-blob --yes --key cosign.key --signing-config signing-config.json --bundle sbom.cdx.sigstore.json sbom.cdx.json
+          cosign verify-blob --key cosign.pub --bundle sbom.cdx.sigstore.json --insecure-ignore-tlog sbom.cdx.json
+          rm -f cosign.key cosign.pub signing-config.json sbom.cdx.sigstore.json
