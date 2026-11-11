@@ -172,6 +172,10 @@ Configure under **Settings → Secrets and variables → Actions** for live AWS 
 | Variable | `EC2_INSTANCE_ID` | EC2 instance ID managed via AWS SSM (`i-...`) |
 | Variable | `TF_STATE_BUCKET` | S3 bucket name for remote Terraform state (`terraform-apply.yaml`) |
 
+### Verified CD Run
+
+![GitHub Actions Build and Deploy](docs/images/cd-deploy-pipeline.png)
+
 ## Infrastructure (Terraform)
 
 Modular AWS configuration under [terraform/](terraform/) targeting `ap-south-1` (Mumbai):
