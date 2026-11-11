@@ -1,0 +1,54 @@
+groups:
+  - name: service_and_host_alerts
+    rules:
+      - alert: AppInstanceDown
+        expr: up{job="devops-stack"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Application target is down"
+          description: "devops-stack failed 4 consecutive 15s scrapes."
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_errors_total[5m]))
+            / clamp_min(sum(rate(http_requests_total[5m])), 1e-9)
+          ) > 0.05
+          and sum(increase(http_requests_total[5m])) >= 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP error rate above 5%"
+          description: "More than 5% of HTTP requests returned 4xx/5xx over the last 5m."
+
+      - alert: HostDiskUsageHigh
+        expr: |
+          (
+            1 - (
+              node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+            )
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host root filesystem above 80% used"
+          description: "Root filesystem usage has exceeded 80% for 5m."
+
+      - alert: ContainerMemoryNearLimit
+        expr: |
+          (
+            max(container_memory_working_set_bytes{name!=""}) by (name)
+            / max(container_spec_memory_limit_bytes{name!=""}) by (name)
+          ) > 0.85
+          and max(container_spec_memory_limit_bytes{name!=""}) by (name) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container memory above 85% of limit"
+          description: "Container {{ $labels.name }} is approaching its cgroup memory limit."
