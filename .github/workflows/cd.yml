@@ -1,0 +1,117 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & Push Multi-Arch Image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.repo }}
+      tag: ${{ steps.version.outputs.sha_tag }}
+      registry: ${{ steps.ecr.outputs.registry }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compute SHA & semver tags
+        id: version
+        run: |
+          short_sha=$(git rev-parse --short=7 HEAD)
+          semver="0.1.0"
+          if latest_tag=$(git describe --tags --abbrev=0 2>/dev/null); then
+            semver="${latest_tag#v}"
+          fi
+          {
+            echo "sha_tag=sha-${short_sha}"
+            echo "semver=${semver}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        if: vars.AWS_DEPLOY_ENABLED == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        if: vars.AWS_DEPLOY_ENABLED == 'true'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Resolve image repository
+        id: image
+        env:
+          DEPLOY_ENABLED: ${{ vars.AWS_DEPLOY_ENABLED }}
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPO: ${{ vars.ECR_REPOSITORY }}
+        run: |
+          if [ "$DEPLOY_ENABLED" = "true" ]; then
+            echo "repo=${ECR_REGISTRY}/${ECR_REPO}" >> "$GITHUB_OUTPUT"
+          else
+            echo "repo=devops-stack" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.repo }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.sha_tag }}
+            type=raw,value=${{ steps.version.outputs.semver }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./app
+          platforms: linux/amd64,linux/arm64
+          push: ${{ vars.AWS_DEPLOY_ENABLED == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_VERSION=${{ steps.version.outputs.semver }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to EC2 via SSM
+    needs: build
+    if: vars.AWS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy container, smoke-test /health, and roll back on failure
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          TAG: ${{ needs.build.outputs.tag }}
+          ECR_REGISTRY: ${{ needs.build.outputs.registry }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+        run: ./scripts/ssm_deploy.sh

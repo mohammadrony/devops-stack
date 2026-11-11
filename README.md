@@ -141,3 +141,28 @@ sudo systemctl daemon-reload && sudo systemctl enable --now system-health.timer
 ```
 
 `system-health.service` sets `SuccessExitStatus=1 2` so warning/critical health exits are logged without marking the scheduled unit as failed. Alternatively, copy [scripts/system-health.cron](scripts/system-health.cron) to `/etc/cron.d/system-health`.
+
+## CI/CD Pipeline
+
+Two workflows live under [.github/workflows/](.github/workflows/):
+
+- **[ci.yml](.github/workflows/ci.yml)** (runs on every PR to `main`):
+  - `gofmt`, `go vet`, and `go test -v -race` with per-function coverage summary posted to the workflow summary.
+  - `hadolint` on [app/Dockerfile](app/Dockerfile) and `shellcheck` (`v0.11.0`) on shell scripts.
+  - Docker Buildx image build + Trivy scan (summarizes `HIGH,CRITICAL`, fails on `CRITICAL`).
+- **[cd.yml](.github/workflows/cd.yml)** (runs on push to `main` and manual dispatch):
+  - Multi-architecture Buildx build (`linux/amd64`, `linux/arm64`) with GitHub Actions layer cache (`type=gha`).
+  - Tags images with both the short commit SHA (`sha-<7chars>`) and the semantic version (`0.1.0` or latest `v*` git tag) — never `latest` alone.
+  - When `AWS_DEPLOY_ENABLED` is `true`, authenticates to AWS via GitHub OIDC (no static access keys), pushes to Amazon ECR, and triggers [ssm_deploy.sh](scripts/ssm_deploy.sh) → [remote_deploy.sh](scripts/remote_deploy.sh) over AWS SSM to update the EC2 container, smoke-test `/health`, and automatically roll back to the previous image on failure.
+
+### Required GitHub Settings (for Live AWS Deploy)
+
+Configure under **Settings → Secrets and variables → Actions** once the AWS target exists:
+
+| Type | Name | Value |
+| :--- | :--- | :--- |
+| Secret | `AWS_ROLE_ARN` | IAM role ARN trusted for `token.actions.githubusercontent.com` OIDC on this repo |
+| Variable | `AWS_DEPLOY_ENABLED` | `true` (leave unset or `false` to build multi-arch without deploying) |
+| Variable | `AWS_REGION` | Target AWS region (e.g. `us-east-1`) |
+| Variable | `ECR_REPOSITORY` | ECR repository name (e.g. `devops-stack`) |
+| Variable | `EC2_INSTANCE_ID` | EC2 instance ID managed via AWS SSM (`i-...`) |

@@ -222,7 +222,10 @@ func run(ctx context.Context) error {
 }
 
 func healthcheck() int {
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{
+		Timeout:   2 * time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
 	resp, err := client.Get("http://127.0.0.1:" + envOr("PORT", "8080") + "/health")
 	if err != nil {
 		return 1
