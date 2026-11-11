@@ -1,0 +1,24 @@
+replicaCount: 3
+
+config:
+  logLevel: "info"
+  appEnv: "production"
+
+externalSecrets:
+  enabled: true
+  refreshInterval: "1m"
+  vault:
+    secretPath: "devops-stack/production"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70

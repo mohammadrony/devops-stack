@@ -14,6 +14,13 @@ lint:
 	[ -d terraform/.terraform ] || terraform -chdir=terraform init -backend=false -input=false >/dev/null
 	terraform -chdir=terraform validate
 	trivy config --ignorefile terraform/.trivyignore.yaml --tf-vars terraform/environments/staging.tfvars --severity HIGH,CRITICAL --exit-code 1 terraform
+	trivy config --severity HIGH,CRITICAL --exit-code 1 k8s
+	helm lint charts/devops-stack
+	helm lint charts/devops-stack -f charts/devops-stack/values-staging.yaml
+	helm lint charts/devops-stack -f charts/devops-stack/values-production.yaml
+	trivy config --severity HIGH,CRITICAL --exit-code 1 charts/devops-stack
+	trivy config --helm-values charts/devops-stack/values-staging.yaml --severity HIGH,CRITICAL --exit-code 1 charts/devops-stack
+	trivy config --helm-values charts/devops-stack/values-production.yaml --severity HIGH,CRITICAL --exit-code 1 charts/devops-stack
 
 build:
 	docker build -t devops-stack:0.1.0 ./app

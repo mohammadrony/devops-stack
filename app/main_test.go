@@ -19,12 +19,13 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "warn")
 	t.Setenv("APP_ENV", "staging")
 	t.Setenv("APP_VERSION", "1.2.3")
+	t.Setenv("SHUTDOWN_DELAY", "2s")
 
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.port != "9090" || cfg.logLevel != slog.LevelWarn || cfg.env != "staging" || cfg.version != "1.2.3" {
+	if cfg.port != "9090" || cfg.logLevel != slog.LevelWarn || cfg.env != "staging" || cfg.version != "1.2.3" || cfg.shutdownDelay != 2*time.Second {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 
@@ -37,6 +38,12 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "verbose")
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("expected error for invalid LOG_LEVEL")
+	}
+
+	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("SHUTDOWN_DELAY", "-1s")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected error for negative SHUTDOWN_DELAY")
 	}
 }
 

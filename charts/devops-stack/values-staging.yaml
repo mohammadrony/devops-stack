@@ -1,0 +1,16 @@
+replicaCount: 2
+
+config:
+  logLevel: "debug"
+  appEnv: "staging"
+
+externalSecrets:
+  enabled: true
+  refreshInterval: "10s"
+  vault:
+    secretPath: "devops-stack/staging"
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
