@@ -48,7 +48,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   lint-infra:
-    name: Dockerfile, Shell, Terraform, K8s & Helm
+    name: Dockerfile, Shell, Infra, Configs & Docs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -116,6 +116,23 @@ jobs:
           trivy config --helm-values charts/devops-stack/values-staging.yaml --severity HIGH,CRITICAL --exit-code 1 charts/devops-stack
           trivy config --helm-values charts/devops-stack/values-production.yaml --severity HIGH,CRITICAL --exit-code 1 charts/devops-stack
 
+      - name: Validate Prometheus & Alertmanager configs
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" prom/prometheus:v3.16.0 check rules /etc/prometheus/alerts.yml
+          docker run --rm --entrypoint sh -v "$PWD/monitoring/alertmanager:/etc/alertmanager:ro" prom/alertmanager:v0.35.0 -c 'printf "http://127.0.0.1:9999/disabled" > /tmp/webhook_url && exec amtool check-config /etc/alertmanager/alertmanager.yml'
+
+      - name: Lint Ansible playbook (ansible-lint)
+        uses: ansible/ansible-lint@b74fb6f73d234bf92672372cb1c10768e4018d16 # v26.11.0
+        with:
+          working_directory: ansible
+          requirements_file: requirements.yml
+          args: playbook.yml
+
+      - name: Lint Markdown documentation
+        run: |
+          docker run --rm -v "$PWD:/workdir" ghcr.io/igorshubovych/markdownlint-cli:v0.50.0 README.md
+
   image-scan:
     name: Build & Trivy Scan
     needs: [lint-and-test, lint-infra]
@@ -153,3 +170,27 @@ jobs:
           format: table
           severity: CRITICAL
           exit-code: "1"
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          trivy image --format cyclonedx --output sbom.cdx.json "devops-stack:pr-${{ github.sha }}"
+          {
+            echo "### CycloneDX SBOM"
+            echo "Generated \`sbom.cdx.json\` with $(jq '.components | length' sbom.cdx.json) components."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CycloneDX SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-pr-${{ github.sha }}
+          path: sbom.cdx.json
+
+      - name: Set up Cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Verify Cosign SBOM signing flow (ephemeral offline check)
+        run: |
+          COSIGN_PASSWORD="" cosign generate-key-pair
+          COSIGN_PASSWORD="" cosign sign-blob --yes --key cosign.key --tlog-upload=false --output-signature sbom.cdx.sig sbom.cdx.json
+          cosign verify-blob --key cosign.pub --signature sbom.cdx.sig --insecure-ignore-tlog sbom.cdx.json
+          rm -f cosign.key cosign.pub sbom.cdx.sig

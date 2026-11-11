@@ -31,6 +31,9 @@ Options:
   --max-log-bytes N  Rotate log once size reaches N bytes (default: 1048576)
   --json             Print JSON output to stdout (warnings go to stderr)
   -h, --help         Show this help message and exit
+
+Environment:
+  HEALTH_WEBHOOK_URL  Optional Slack or Discord webhook URL alerted on exit 1/2
 EOF
 }
 
@@ -348,6 +351,24 @@ format_json() {
     "$load1" "$load5" "$load15" "$disks_json" "$procs_json" "$alerts_json"
 }
 
+send_webhook() {
+  local url="$1"
+  local text="$2"
+  if ! command -v curl >/dev/null 2>&1; then
+    printf 'warning: curl not found, skipping webhook alert\n' >&2
+    return 0
+  fi
+  local payload
+  if [[ "$url" == *discord.com/api/webhooks/* || "$url" == *discordapp.com/api/webhooks/* ]]; then
+    payload=$(printf '{"content":%s}' "$(json_escape "$text")")
+  else
+    payload=$(printf '{"text":%s}' "$(json_escape "$text")")
+  fi
+  if ! curl -fsS -m 5 -H 'Content-Type: application/json' -d "$payload" "$url" >/dev/null 2>&1; then
+    printf 'warning: failed to deliver webhook alert\n' >&2
+  fi
+}
+
 log_dir=$(dirname "$LOG_FILE")
 mkdir -p "$log_dir"
 rotate_log "$LOG_FILE" "$MAX_LOG_BYTES" "$MAX_LOG_BACKUPS"
@@ -365,6 +386,12 @@ else
   report=$(format_text)
   printf '%s\n' "$report"
   printf '%s\n\n' "$report" >> "$LOG_FILE"
+fi
+
+if [[ -n "${HEALTH_WEBHOOK_URL:-}" ]] && (( exit_code >= 1 )); then
+  alert_summary=$(printf '%s on %s (%s): cpu=%s%% mem=%s%% | %s' \
+    "${status^^}" "$host_name" "$timestamp" "$cpu_pct" "$mem_pct" "${alerts[*]}")
+  send_webhook "$HEALTH_WEBHOOK_URL" "$alert_summary"
 fi
 
 exit "$exit_code"
