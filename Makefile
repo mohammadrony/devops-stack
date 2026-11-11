@@ -1,6 +1,20 @@
-.DEFAULT_GOAL := help
+.PHONY: test lint build up down logs
 
-.PHONY: help
-help: ## Show available targets
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+test:
+	cd app && go test -v -race ./...
+
+lint:
+	cd app && test -z "$$(gofmt -l .)" && go vet ./...
+	docker run --rm -i hadolint/hadolint:v2.12.0 < app/Dockerfile
+
+build:
+	docker build -t devops-stack:0.1.0 ./app
+
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f app
