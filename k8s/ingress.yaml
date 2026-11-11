@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: devops-stack
+  namespace: devops-stack
+  labels:
+    app.kubernetes.io/name: devops-stack
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: devops-stack
+                port:
+                  name: http

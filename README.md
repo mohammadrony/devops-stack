@@ -46,6 +46,7 @@ make lint
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `APP_ENV` | `local` | Environment field in JSON logs |
 | `APP_VERSION` | `0.1.0` | Version returned by `GET /` |
+| `SHUTDOWN_DELAY` | `0s` | Pre-shutdown drain window (`SIGTERM` readiness flip before closing listener) |
 | `GRAFANA_ADMIN_USER` | `admin` | Grafana admin username |
 | `GRAFANA_ADMIN_PASSWORD` | — | Grafana admin password |
 
@@ -148,7 +149,7 @@ Three workflows live under [.github/workflows/](.github/workflows/):
 
 - **[ci.yml](.github/workflows/ci.yml)** (runs on every PR to `main`):
   - `gofmt`, `go vet`, and `go test -v -race` with per-function coverage summary posted to the workflow summary.
-  - `hadolint` on [app/Dockerfile](app/Dockerfile), `shellcheck` (`v0.11.0`) on shell scripts, `terraform fmt`/`validate`, and Trivy IaC config scan.
+  - `hadolint` on [app/Dockerfile](app/Dockerfile), `shellcheck` (`v0.11.0`) on shell scripts, `terraform fmt`/`validate`, `helm lint`, and Trivy config scans on `terraform/`, `k8s/`, and `charts/devops-stack/`.
   - Docker Buildx image build + Trivy image scan (summarizes `HIGH,CRITICAL`, fails on `CRITICAL`).
 - **[cd.yml](.github/workflows/cd.yml)** (runs on push to `main` and manual dispatch):
   - Multi-architecture Buildx build (`linux/amd64`, `linux/arm64`) with GitHub Actions layer cache (`type=gha`).
@@ -256,3 +257,167 @@ $ aws --region ap-south-1 logs get-log-events --log-group-name /aws/ec2/devops-s
 ```
 
 </details>
+
+## Kubernetes Deployment
+
+The primary Kubernetes deployment lives in the Helm chart under [charts/devops-stack/](charts/devops-stack/) with separate environment values files ([values-staging.yaml](charts/devops-stack/values-staging.yaml) and [values-production.yaml](charts/devops-stack/values-production.yaml)). A standalone set of plain YAML manifests without CRD dependencies is maintained separately under [k8s/](k8s/) for reference.
+
+Both deployments run in namespace `devops-stack`, expose port `80` → `8080` via a `ClusterIP` `Service` and `Ingress`, enforce non-root UID/GID `65532` with `readOnlyRootFilesystem: true`, dropped Linux capabilities, `RuntimeDefault` seccomp, `automountServiceAccountToken: false` on pods, `/health` readiness/liveness probes, CPU `HorizontalPodAutoscaler`, and `SHUTDOWN_DELAY=5s` (`terminationGracePeriodSeconds: 20`) so terminating pods return `503` on `/health` while still serving existing traffic until Ingress/Service endpoints drain.
+
+### Helm Chart & Secrets Architecture
+
+Templates under [charts/devops-stack/templates/](charts/devops-stack/templates/) define `ConfigMap`, `Deployment`, `Service`, `Ingress`, `HorizontalPodAutoscaler`, plus `ServiceAccount` (`devops-stack-eso`), `SecretStore`, and `ExternalSecret` (`external-secrets.io/v1`) when `externalSecrets.enabled` is `true`:
+
+- **Zero committed plaintext secrets**: sensitive values (`API_TOKEN`) stay out of Git and Helm values files.
+- **Pluggable secret backends**: secrets can live in **HashiCorp Vault** (tested locally in `k3d`), **AWS Secrets Manager**, or **AWS SSM Parameter Store**. **External Secrets Operator (ESO)** syncs them into a standard Kubernetes `Secret` (`devops-stack-secrets`) using a dedicated `ServiceAccount` (`devops-stack-eso`) — application pods themselves never hold Vault or AWS credentials.
+- **Automatic rotation rollouts**: [deployment.yaml](charts/devops-stack/templates/deployment.yaml) carries `secret.reloader.stakater.com/reload: "devops-stack-secrets"`, so **Stakater Reloader** detects `Secret` updates from ESO and triggers a rolling update automatically (`maxUnavailable: 0`, `maxSurge: 1`).
+- **Environment separation**: [values-staging.yaml](charts/devops-stack/values-staging.yaml) runs `2`–`4` replicas (`logLevel: debug`, Vault path `devops-stack/staging`, `refreshInterval: 10s`); [values-production.yaml](charts/devops-stack/values-production.yaml) runs `3`–`10` replicas (`logLevel: info`, Vault path `devops-stack/production`, `refreshInterval: 1m`, higher CPU/memory).
+
+### Local Cluster Setup & Helm Deploy (`k3d`)
+
+Tested with `k3d` (`k3s` with Traefik Ingress and `metrics-server`), `hashicorp/vault` `0.34.1`, `external-secrets/external-secrets` `2.15.0`, and `stakater/reloader` `2.2.19`:
+
+```bash
+# 1. Build v0.1.0 / v0.2.0 and start a local k3d cluster
+docker build --build-arg APP_VERSION=0.1.0 -t devops-stack:0.1.0 ./app
+docker build --build-arg APP_VERSION=0.2.0 -t devops-stack:0.2.0 ./app
+k3d cluster create devops-stack -p "8080:80@loadbalancer" --wait
+k3d image import devops-stack:0.1.0 devops-stack:0.2.0 -c devops-stack
+
+# 2. Install platform services (Vault dev mode, External Secrets Operator, Stakater Reloader)
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm repo add external-secrets https://charts.external-secrets.io
+helm repo add stakater https://stakater.github.io/stakater-charts
+helm repo update
+
+helm upgrade --install vault hashicorp/vault --version 0.34.1 -n vault --create-namespace \
+  --set server.dev.enabled=true --set injector.enabled=false --wait
+helm upgrade --install external-secrets external-secrets/external-secrets --version 2.15.0 \
+  -n external-secrets --create-namespace --wait
+helm upgrade --install reloader stakater/reloader --version 2.2.19 -n reloader --create-namespace --wait
+
+# 3. Configure Vault Kubernetes Auth + read policy + staging secret
+kubectl -n vault exec -i vault-0 -- sh -s <<'EOF'
+vault auth enable kubernetes
+vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443"
+vault policy write devops-stack-read - <<'POLICY'
+path "secret/data/devops-stack/*" { capabilities = ["read"] }
+path "secret/data/devops-stack" { capabilities = ["read"] }
+POLICY
+vault write auth/kubernetes/role/devops-stack \
+  bound_service_account_names=devops-stack-eso \
+  bound_service_account_namespaces=devops-stack \
+  policies=devops-stack-read ttl=1h
+vault kv put secret/devops-stack/staging API_TOKEN="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 24)"
+EOF
+
+# 4. Deploy the Helm chart (staging values)
+helm upgrade --install devops-stack ./charts/devops-stack \
+  -n devops-stack --create-namespace \
+  -f charts/devops-stack/values-staging.yaml --wait
+curl -fsS http://localhost:8080/health
+curl -fsS http://localhost:8080/
+# Alternative without Ingress: kubectl -n devops-stack port-forward svc/devops-stack 8080:80
+```
+
+### Secret Rotation, Upgrade & Rollback
+
+```bash
+# Rotate secret in Vault -> ESO syncs (~10s) -> Reloader restarts Deployment automatically
+kubectl -n vault exec vault-0 -- vault kv put secret/devops-stack/staging API_TOKEN="rotated-$(date +%s)"
+kubectl -n devops-stack rollout status deployment/devops-stack
+
+# Zero-downtime Helm upgrade & rollback
+helm upgrade devops-stack ./charts/devops-stack -n devops-stack \
+  -f charts/devops-stack/values-staging.yaml --set image.tag=0.2.0 --wait
+curl -fsS http://localhost:8080/
+
+helm rollback devops-stack -n devops-stack --wait
+curl -fsS http://localhost:8080/
+```
+
+<details>
+<summary>Verified Vault → ESO → Stakater Reloader rotation, Helm upgrade/rollback, and HPA output (301 requests, 0 failures)</summary>
+
+```text
+# Vault secret rotation synced by ESO & detected by Stakater Reloader
+ESO synced rotated secret after 9s: v3-zero-downtime-030
+time="2026-11-11T03:54:56Z" level=info msg="Changes detected in 'devops-stack-secrets' of type 'SECRET' in namespace 'devops-stack'; updated 'devops-stack' of type 'Deployment' in namespace 'devops-stack'"
+
+# Helm resources & HPA status
+$ kubectl -n devops-stack get secretstore,externalsecret,secret,deploy,pods,svc,ingress,hpa
+NAME                                                 STATUS   CAPABILITIES   READY
+secretstore.external-secrets.io/devops-stack-vault   Valid    ReadWrite      True
+
+NAME                                              STORETYPE     STORE                REFRESH INTERVAL   STATUS         READY
+externalsecret.external-secrets.io/devops-stack   SecretStore   devops-stack-vault   10s                SecretSynced   True
+
+NAME                                               REFERENCE                 TARGETS       MINPODS   MAXPODS   REPLICAS
+horizontalpodautoscaler.autoscaling/devops-stack   Deployment/devops-stack   cpu: 2%/70%   2         4         2
+
+$ helm history devops-stack -n devops-stack
+REVISION  STATUS      CHART               APP VERSION  DESCRIPTION
+1         superseded  devops-stack-0.1.0  0.1.0        Install complete
+2         superseded  devops-stack-0.1.0  0.1.0        Upgrade complete
+3         superseded  devops-stack-0.1.0  0.1.0        Upgrade complete
+4         superseded  devops-stack-0.1.0  0.1.0        Rollback to 2
+5         superseded  devops-stack-0.1.0  0.1.0        Upgrade complete
+6         deployed    devops-stack-0.1.0  0.1.0        Rollback to 4
+
+# Continuous polling at 100ms intervals across Vault rotation -> upgrade 0.2.0 -> rollback 0.1.0 -> post-drain
+Total requests: 301, Non-200 failures: 0
+200 {"message":"Hello from DevOps Task!","status":"running","version":"0.1.0"}
+200 {"message":"Hello from DevOps Task!","status":"running","version":"0.2.0"}
+```
+
+</details>
+
+Clean up the local cluster when finished:
+
+```bash
+k3d cluster delete devops-stack
+```
+
+### Plain Manifests Reference (`k8s/`)
+
+Plain YAML manifests under [k8s/](k8s/) ([00-namespace.yaml](k8s/00-namespace.yaml), [configmap.yaml](k8s/configmap.yaml), [deployment.yaml](k8s/deployment.yaml), [service.yaml](k8s/service.yaml), [ingress.yaml](k8s/ingress.yaml), [hpa.yaml](k8s/hpa.yaml)) deploy the same hardened service without Helm, ESO, or Reloader prerequisites; `API_TOKEN` is created imperatively via `kubectl create secret`:
+
+```bash
+kubectl apply -f k8s/00-namespace.yaml
+kubectl create secret generic devops-stack-secrets -n devops-stack \
+  --from-literal=API_TOKEN="$(openssl rand -hex 16)" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f k8s/
+kubectl -n devops-stack rollout status deployment/devops-stack
+
+# Rolling update & rollback
+kubectl -n devops-stack set image deployment/devops-stack app=devops-stack:0.2.0
+kubectl -n devops-stack rollout status deployment/devops-stack
+kubectl -n devops-stack rollout undo deployment/devops-stack
+kubectl -n devops-stack rollout status deployment/devops-stack
+```
+
+<details>
+<summary>Verified plain k8s/ rolling update and kubectl rollout undo output (255 requests, 0 failures)</summary>
+
+```text
+$ kubectl -n devops-stack set image deployment/devops-stack app=devops-stack:0.2.0
+deployment.apps/devops-stack image updated
+deployment "devops-stack" successfully rolled out
+
+$ kubectl -n devops-stack rollout undo deployment/devops-stack
+deployment.apps/devops-stack rolled back
+deployment "devops-stack" successfully rolled out
+
+# Continuous polling at 100ms intervals across set image -> rollout undo -> 6s post-drain
+Total requests: 255, Non-200 failures: 0
+```
+
+</details>
+
+### Production Changes on EKS
+
+- **Ingress controller**: install AWS Load Balancer Controller and annotate `Ingress` for ALB (`alb.ingress.kubernetes.io/scheme: internet-facing`, ACM TLS termination on `443`, target-type `ip`) or NGINX Ingress behind an NLB, with ExternalDNS managing Route 53 records.
+- **Secrets management**: point the chart's `SecretStore` provider at **AWS Secrets Manager** or **AWS SSM Parameter Store** instead of local Vault, authorize ESO via **EKS Pod Identity** or **IRSA**, keep KMS `etcd` envelope encryption enabled, and retain Stakater Reloader for zero-downtime secret rotation rollouts.
+- **Node & pod autoscaling**: run **Karpenter** (or Cluster Autoscaler) across Multi-AZ node pools alongside PodDisruptionBudgets (`minAvailable: 1`) and topology spread constraints (`topology.kubernetes.io/zone`), keeping `SHUTDOWN_DELAY` aligned with ALB target deregistration timing.
+- **IAM & registry access**: keep `automountServiceAccountToken: false` on application Pods, isolate ESO's `ServiceAccount` (`devops-stack-eso`) to secret reads, and pull pinned `sha-*` images from private Amazon ECR.

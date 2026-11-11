@@ -24,10 +24,11 @@ import (
 var version = "0.1.0"
 
 type config struct {
-	port     string
-	logLevel slog.Level
-	env      string
-	version  string
+	port          string
+	logLevel      slog.Level
+	env           string
+	version       string
+	shutdownDelay time.Duration
 }
 
 type statusWriter struct {
@@ -76,11 +77,17 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("invalid LOG_LEVEL %q", os.Getenv("LOG_LEVEL"))
 	}
 
+	shutdownDelay, err := time.ParseDuration(envOr("SHUTDOWN_DELAY", "0s"))
+	if err != nil || shutdownDelay < 0 {
+		return config{}, fmt.Errorf("invalid SHUTDOWN_DELAY %q", os.Getenv("SHUTDOWN_DELAY"))
+	}
+
 	return config{
-		port:     port,
-		logLevel: lvl,
-		env:      envOr("APP_ENV", "local"),
-		version:  envOr("APP_VERSION", version),
+		port:          port,
+		logLevel:      lvl,
+		env:           envOr("APP_ENV", "local"),
+		version:       envOr("APP_VERSION", version),
+		shutdownDelay: shutdownDelay,
 	}, nil
 }
 
@@ -209,8 +216,12 @@ func run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		log.Info("shutdown_initiated")
+		log.Info("shutdown_initiated", "delay", cfg.shutdownDelay.String())
 		draining.Store(true)
+		// Allow load balancers / kube-proxy time to remove the endpoint before closing listeners.
+		if cfg.shutdownDelay > 0 {
+			time.Sleep(cfg.shutdownDelay)
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {

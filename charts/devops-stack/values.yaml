@@ -1,0 +1,53 @@
+replicaCount: 2
+
+image:
+  repository: devops-stack
+  tag: ""
+  pullPolicy: IfNotPresent
+
+config:
+  port: "8080"
+  logLevel: "info"
+  appEnv: "kubernetes"
+  shutdownDelay: "5s"
+
+secret:
+  name: devops-stack-secrets
+  envVarName: APP_API_TOKEN
+  key: API_TOKEN
+
+reloader:
+  enabled: true
+
+externalSecrets:
+  enabled: false
+  refreshInterval: "10s"
+  vault:
+    server: "http://vault.vault.svc.cluster.local:8200"
+    kvPath: "secret"
+    secretPath: "devops-stack"
+    role: "devops-stack"
+    kubernetesMountPath: "kubernetes"
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: ""
+  host: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70

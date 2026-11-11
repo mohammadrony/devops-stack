@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-stack
+  namespace: devops-stack
+  labels:
+    app.kubernetes.io/name: devops-stack
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: devops-stack
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
