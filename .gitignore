@@ -1,7 +1,7 @@
-# Local workflow & working files (not part of the repository)
+# Local workflow & working files
 GEMINI.md
 TODO.md
-DevOps_Engineer_Assessment_Task.pdf
+pdf/
 
 # Environment & secrets
 .env

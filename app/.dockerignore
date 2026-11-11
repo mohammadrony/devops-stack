@@ -1,0 +1,9 @@
+.git
+.gitignore
+Dockerfile
+*.md
+*.test
+coverage.out
+coverage.html
+.env
+.env.*
