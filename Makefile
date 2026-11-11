@@ -27,7 +27,7 @@ lint:
 	trivy config --helm-values charts/devops-stack/values-production.yaml --severity HIGH,CRITICAL --exit-code 1 charts/devops-stack
 
 lint-ansible:
-	docker run --rm -v "$$(pwd):/repo:ro" alpine:3.21 sh -c 'apk add --no-cache ansible-lint >/dev/null 2>&1 && cp -r /repo/ansible /tmp/ansible-work && cd /tmp/ansible-work && HOME=/tmp ANSIBLE_HOME=/tmp/ansible ansible-galaxy install -r requirements.yml >/dev/null && HOME=/tmp ANSIBLE_HOME=/tmp/ansible ansible-lint playbook.yml'
+	docker run --rm -v "$$(pwd):/repo:ro" alpine:3.23 sh -c 'apk add --no-cache ansible-lint >/dev/null 2>&1 && cp -r /repo/ansible /tmp/ansible-work && cd /tmp/ansible-work && HOME=/tmp ANSIBLE_HOME=/tmp/ansible ansible-galaxy install -r requirements.yml >/dev/null && HOME=/tmp ANSIBLE_HOME=/tmp/ansible ansible-lint playbook.yml'
 
 build:
 	docker build -t devops-stack:0.1.0 ./app
