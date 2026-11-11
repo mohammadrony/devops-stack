@@ -125,7 +125,10 @@ func TestGracefulShutdown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- run(ctx) }()
 
-	client := &http.Client{Timeout: time.Second}
+	client := &http.Client{
+		Timeout:   time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
 	ready := false
 	for range 20 {
 		resp, err := client.Get("http://127.0.0.1:" + port + "/health")

@@ -6,7 +6,8 @@ test:
 lint:
 	cd app && test -z "$$(gofmt -l .)" && go vet ./...
 	docker run --rm -i hadolint/hadolint:v2.15.1 < app/Dockerfile
-	docker run --rm -i koalaman/shellcheck:v0.11.0 - < scripts/system_health.sh
+	docker run --rm -v "$$(pwd):/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh
+	docker run --rm -v "$$(pwd):/repo" -w /repo rhysd/actionlint:1.7.12
 
 build:
 	docker build -t devops-stack:0.1.0 ./app
