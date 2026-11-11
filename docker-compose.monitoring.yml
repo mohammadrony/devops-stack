@@ -20,6 +20,33 @@ services:
     networks:
       - monitoring
 
+  alertmanager:
+    image: prom/alertmanager:v0.35.0
+    container_name: alertmanager
+    entrypoint: ["/bin/sh", "-c"]
+    # Append /slack automatically when given a Discord webhook URL so one env var handles both.
+    command:
+      - |
+        url="$${ALERT_WEBHOOK_URL:-http://127.0.0.1:9999/disabled}"
+        case "$$url" in
+          https://discord.com/api/webhooks/*|https://discordapp.com/api/webhooks/*)
+            case "$$url" in */slack) ;; *) url="$${url%/}/slack" ;; esac
+            ;;
+        esac
+        printf '%s' "$$url" > /tmp/webhook_url
+        # Valid external URL required for Discord /slack title_link validation; set ALERTMANAGER_EXTERNAL_URL in prod.
+        exec /bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager --web.external-url="$$ALERTMANAGER_EXTERNAL_URL"
+    environment:
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERTMANAGER_EXTERNAL_URL: ${ALERTMANAGER_EXTERNAL_URL:-http://localhost:9093}
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    restart: unless-stopped
+    networks:
+      - default
+      - monitoring
+
   loki:
     image: grafana/loki:3.7.9
     container_name: loki
@@ -110,6 +137,7 @@ networks:
 
 volumes:
   prometheus_data:
+  alertmanager_data:
   loki_data:
   alloy_data:
   grafana_data:

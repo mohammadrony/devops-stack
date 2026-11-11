@@ -20,6 +20,7 @@ coverage.html
 # Logs & runtime outputs
 *.log
 health_log.txt*
+ansible/inventory.ini
 
 # Terraform local state & temporary files
 **/.terraform/
