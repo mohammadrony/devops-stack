@@ -27,6 +27,8 @@ health_log.txt*
 *.tfstate.*
 *.tfplan
 tfplan
+*.tfbackend
+!*.tfbackend.example
 *.auto.tfvars
 *secret*.tfvars
 crash.log

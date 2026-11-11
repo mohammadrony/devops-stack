@@ -23,6 +23,8 @@ run_app() {
       --log-opt "awslogs-region=${AWS_REGION}"
       --log-opt "awslogs-group=${CW_LOG_GROUP}"
       --log-opt "awslogs-stream=devops-stack"
+      --log-opt mode=non-blocking
+      --log-opt max-buffer-size=4m
     )
   fi
 
