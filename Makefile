@@ -8,6 +8,12 @@ lint:
 	docker run --rm -i hadolint/hadolint:v2.15.1 < app/Dockerfile
 	docker run --rm -v "$$(pwd):/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh
 	docker run --rm -v "$$(pwd):/repo" -w /repo rhysd/actionlint:1.7.12
+	terraform fmt -check -recursive terraform
+	[ -d terraform/bootstrap/.terraform ] || terraform -chdir=terraform/bootstrap init -backend=false -input=false >/dev/null
+	terraform -chdir=terraform/bootstrap validate
+	[ -d terraform/.terraform ] || terraform -chdir=terraform init -backend=false -input=false >/dev/null
+	terraform -chdir=terraform validate
+	trivy config --ignorefile terraform/.trivyignore.yaml --tf-vars terraform/environments/staging.tfvars --severity HIGH,CRITICAL --exit-code 1 terraform
 
 build:
 	docker build -t devops-stack:0.1.0 ./app

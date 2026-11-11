@@ -1,0 +1,17 @@
+misconfigurations:
+  - id: AVD-AWS-0017
+    statement: Default CloudWatch Logs encryption avoids extra KMS CMK charges.
+  - id: AVD-AWS-0031
+    statement: Mutable ECR tags let CD refresh the base semver; deploys pin sha-* tags.
+  - id: AVD-AWS-0033
+    statement: ECR AES256 encryption avoids extra KMS CMK charges.
+  - id: AVD-AWS-0057
+    statement: ecr:GetAuthorizationToken only supports Resource "*".
+  - id: AVD-AWS-0089
+    statement: Separate S3 access-log bucket omitted for Terraform state.
+  - id: AVD-AWS-0104
+    statement: Outbound HTTPS 443 required for SSM, ECR, and CloudWatch APIs.
+  - id: AVD-AWS-0107
+    statement: HTTP port 8080 intentionally exposed on allowed_cidr.
+  - id: AVD-AWS-0132
+    statement: S3 SSE-S3 AES256 encryption avoids extra KMS CMK charges.
